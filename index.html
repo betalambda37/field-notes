@@ -155,6 +155,23 @@ label.btn{overflow:hidden}
 .eyebrow{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
 .sec{margin:22px 0 10px;display:flex;align-items:center;gap:10px}
 .sec::after{content:"";flex:1;height:1px;background:var(--line)}
+/* fold: tap a card's title bar to open or close it */
+.fold-h{cursor:pointer;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;align-items:center}
+.fold-h .chev{flex:none;width:18px;height:18px;margin-left:auto;color:var(--ink-3);transition:transform .15s}
+.fold-h .sub + .chev{margin-left:8px}
+.card.folded{padding-bottom:16px}
+.card.folded > .fold-h{margin-bottom:0}
+.card.folded > .fold-h .chev{transform:rotate(-90deg)}
+.card.folded > :not(.fold-h){display:none !important}
+.foldbar{display:flex;gap:8px;justify-content:flex-end;margin:0 0 12px}
+.lk-mon{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:16px 0 4px}
+.lk-row{display:flex;align-items:center;gap:10px;width:100%;padding:11px 2px;border:0;border-bottom:1px solid var(--line);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.lk-row .lk-d{flex:none;width:118px;font-size:14px}
+.lk-row .lk-v{flex:1;font-size:14px;color:var(--ink-2)}
+.lk-row .lk-go{flex:none;color:var(--ink-3)}
+.lk-sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:7px}
+.lk-sum{font-size:14px;margin:4px 0 2px}
+@media print{ .card.folded > :not(.fold-h){display:revert !important} .fold-h .chev,.foldbar{display:none} }
 .muted{color:var(--ink-2)}
 .dim{color:var(--ink-3)}
 .tiny{font-size:12px}
@@ -571,7 +588,7 @@ var SAVE_ERR = "";
 var saveTimer = null;
 var FIRST_RUN = false;                 // nothing has ever been stored here
 var LOAD_TROUBLE = "";                 // set if stored text existed but wouldn't parse
-var UI = { libQuery: "", libOpen: false, trendDays: 30, trendGroup: "all", labMarker: null, cmpEvent: null, cmpWin: 14, cyclePhaseSym: null, labEvAll: false };
+var UI = { libQuery: "", libOpen: false, trendDays: 30, trendGroup: "all", labMarker: null, cmpEvent: null, cmpWin: 14, cyclePhaseSym: null, labEvAll: false, lookSym: "", lookRange: "all", lookTxt: "" };
 
 var LS_OK = (function () {
   try {
@@ -602,7 +619,7 @@ function blankState() {
 }
 
 /* Version shown under Setup, so she can tell at a glance she has the update. */
-var APP_VERSION = "2026-10-04b";
+var APP_VERSION = "2026-10-31";
 
 /* Questions grew from {id, text, created} into a record that lives until it is
    actually asked: who it is for, when it was asked, and what the answer was.
@@ -1206,6 +1223,7 @@ function render() {
   else if (VIEW === "labs") v.innerHTML = viewLabs();
   else if (VIEW === "meds") v.innerHTML = viewMeds();
   else if (VIEW === "summary") v.innerHTML = viewSummary();
+  if (VIEW === "today" || VIEW === "trends") applyFolds(v);
   paintSaveBar();
   paintNotices();
   if (VIEW === "labs") wireLabChart();
@@ -1299,7 +1317,8 @@ function symptomBlock(iso) {
 
   var html = "", sleepPlaced = false;
   order.forEach(function (g) {
-    html += '<div class="sec"><span class="eyebrow">' + esc(g) + '</span></div><div class="card">';
+    var rated = groups[g].filter(function (s) { return vals[s.id] != null; }).length;
+    html += '<div class="card" data-fold="grp:' + esc(g) + '"><div class="card-h"><h2>' + esc(g) + '</h2><span class="sub">' + rated + ' of ' + groups[g].length + ' rated</span></div>';
     groups[g].forEach(function (s) {
       var v = vals[s.id];
       var L = scaleLabels(s);
@@ -1318,7 +1337,7 @@ function symptomBlock(iso) {
   });
   // if she has turned off every Energy & sleep symptom the group disappears —
   // the sleep fields must not disappear with it
-  if (!sleepPlaced) html += '<div class="sec"><span class="eyebrow">Sleep</span></div><div class="card">' + sleepBlock(iso) + '</div>';
+  if (!sleepPlaced) html += '<div class="card"><div class="card-h"><h2>Sleep</h2></div>' + sleepBlock(iso) + '</div>';
   return html;
 }
 
@@ -1437,7 +1456,8 @@ function viewToday() {
     var on = pr[p[0]];
     return '<button class="chip n pc' + (on ? 4 : 1) + '" data-a="practice" data-id="' + p[0] + '" aria-pressed="' + (on ? "true" : "false") + '" style="flex:0 0 auto">' + esc(p[1]) + (on && on !== true ? ' <span class="mono" style="font-size:11px">' + on + 'm</span>' : '') + '</button>';
   }).join("");
-  var practiceCard = '<div class="card"><div class="card-h"><h2>Stress-relief practices</h2><span class="sub">tap to log · tap again to clear</span></div>' +
+  var practiceCard = '<div class="card"><div class="card-h"><h2>Stress-relief practices</h2><span class="sub">' + Object.keys(pr).filter(function (k) { return pr[k]; }).length + ' logged</span></div>' +
+    '<div class="hint" style="margin-bottom:9px">Tap to log, tap again to clear.</div>' +
     '<div class="row" style="gap:6px">' + prChips + '</div>' +
     '<div class="hint" style="margin-top:9px">Long list? Add minutes in the notes field below if the duration matters for a given day.</div></div>';
 
@@ -1448,7 +1468,7 @@ function viewToday() {
   }).join("");
   var actPending = draftAny(iso, ["actType", "actMin", "actInt"]);
   var effOpt = function (o) { return '<option' + (dr.actInt === o ? " selected" : "") + '>' + o + '</option>'; };
-  var actCard = '<div class="card"><div class="card-h"><h2>Activity</h2></div>' + (actRows || '<div class="empty">Nothing logged.</div>') +
+  var actCard = '<div class="card"><div class="card-h"><h2>Activity</h2><span class="sub">' + acts.length + ' logged</span></div>' + (actRows || '<div class="empty">Nothing logged.</div>') +
     '<div class="fgrid" style="margin-top:12px"><div class="fld"><label class="f">What</label><input type="text" id="actType" data-draft="actType" value="' + esc(dr.actType || "") + '" placeholder="Walk, lifting, PT…"></div>' +
     '<div class="fld"><label class="f">Minutes</label><input type="number" id="actMin" data-draft="actMin" value="' + esc(dr.actMin || "") + '" min="0" placeholder="30"></div>' +
     '<div class="fld"><label class="f">Effort</label><select id="actInt" data-draft="actInt"><option value="">—</option>' + effOpt("Easy") + effOpt("Moderate") + effOpt("Hard") + '</select></div></div>' +
@@ -1471,16 +1491,158 @@ function viewToday() {
     (mealPending ? '<span class="hint">Typed but not added yet — kept with ' + (isToday ? "today" : esc(fmtShort(iso))) + ' until you add it.</span>' : '') +
     '</div></div>';
 
-  var notesCard = '<div class="card"><div class="card-h"><h2>Notes for this day</h2></div>' +
+  var notesCard = '<div class="card"><div class="card-h"><h2>Notes for this day</h2><span class="sub">' + ((day && day.notes) ? "Written" : "Empty") + '</span></div>' +
     '<textarea data-in="notes" placeholder="Anything worth remembering — a flare, a bad night, travel, a new food, a stressful call.">' + esc((day && day.notes) || "") + '</textarea></div>';
 
   var addBtn = '<div class="row" style="margin:18px 0 0"><button class="btn" data-a="lib">＋ Add or remove symptoms</button>' +
     '<span class="hint">' + activeSymptoms().length + ' tracked</span></div>';
 
-  return head + quick + cycleCard + suppBlockToday(iso) + symptomBlock(iso) + addBtn +
+  return head + quick + '<div class="foldbar noprint"><button class="btn sm ghost" data-a="foldAll" data-v="1">Collapse all</button><button class="btn sm ghost" data-a="foldAll" data-v="0">Expand all</button></div>' + cycleCard + suppBlockToday(iso) +
+    '<div class="sec"><span class="eyebrow">Symptoms</span></div>' + symptomBlock(iso) + addBtn +
     '<div class="sec"><span class="eyebrow">Inputs</span></div>' +
     practiceCard + actCard + mealCard + notesCard +
     '<div style="height:24px"></div>';
+}
+
+
+/* ---------------- Find dates ----------------
+   The grid answers "how has it been"; this answers "which days". Pick a symptom
+   (or loose / hard stools, or a word in her notes) and get a plain list of dates,
+   newest first, grouped by month. Each row opens that day. */
+function lookupBlock() {
+  var syms = STATE.symptoms.filter(function (s) {
+    if (s.active) return true;
+    return Object.keys(STATE.days).some(function (dt) { var d = STATE.days[dt]; return d && d.s && d.s[s.id] != null; });
+  }).sort(function (a, b) { return (a.ord || 0) - (b.ord || 0); });
+  var sel = UI.lookSym;
+  var opt = function (v, label) { return '<option value="' + esc(v) + '"' + (v === sel ? " selected" : "") + '>' + esc(label) + '</option>'; };
+  var opts = opt("", "Choose…") +
+    '<optgroup label="Symptoms">' + syms.map(function (s) { return opt("sym:" + s.id, s.name + (s.active ? "" : " (not tracking now)")); }).join("") + '</optgroup>' +
+    '<optgroup label="Bowel movements">' + opt("bm:loose", "Loose stool (Bristol 6–7)") + opt("bm:hard", "Hard stool (Bristol 1–2)") + '</optgroup>' +
+    '<optgroup label="Search">' + opt("txt", "A word in my notes or meals…") + '</optgroup>';
+  var rOpt = function (v, label) { return '<option value="' + v + '"' + (String(UI.lookRange) === v ? " selected" : "") + '>' + label + '</option>'; };
+  var ranges = rOpt("all", "All time") + rOpt("30", "Last 30 days") + rOpt("90", "Last 90 days");
+
+  var controls = '<div class="fgrid" style="margin-bottom:6px"><div class="fld" style="grid-column:1/-1"><label class="f">Show me the dates I had</label>' +
+    '<select data-a="lookSym">' + opts + '</select></div>' +
+    (sel === "txt" ? '<div class="fld" style="grid-column:1/-1"><label class="f">Word to find</label><input type="text" data-a="lookTxt" value="' + esc(UI.lookTxt) + '" placeholder="e.g. diarrhea, dairy, travel" enterkeyhint="search"></div>' : '') +
+    '<div class="fld"><label class="f">When</label><select data-a="lookRange">' + ranges + '</select></div></div>';
+
+  var body = "";
+  if (!sel) body = '<div class="hint">Pick something above to get a plain list of the days it happened. Tap any date to open that day.</div>';
+  else body = lookupResults(sel);
+
+  return '<div class="card" data-fold="lookup"><div class="card-h"><h2>Find dates</h2></div>' + controls + body + '</div>';
+}
+
+function lookupResults(sel) {
+  var dates = Object.keys(STATE.days).sort().reverse();
+  if (UI.lookRange !== "all") { var from = addDays(todayISO(), -(+UI.lookRange - 1)); dates = dates.filter(function (d) { return d >= from; }); }
+  var hits = [], checked = 0, title = "";
+
+  if (sel.indexOf("sym:") === 0) {
+    var s = byIdIn(STATE.symptoms, sel.slice(4));
+    if (!s) return '<div class="hint">That symptom no longer exists.</div>';
+    var L = scaleLabels(s), vr = scaleVar(s);
+    title = s.name;
+    dates.forEach(function (dt) {
+      var d = STATE.days[dt], v = d && d.s ? d.s[s.id] : null;
+      if (v == null) return;
+      checked++;
+      // a severity symptom "happened" when it was above None; other scales list every rating
+      if (s.scale === "sev" && !s.labels && v < 2) return;
+      if (s.scale === "sev" && s.labels && v < 2) return;
+      hits.push({ date: dt, html: '<span class="lk-sw" style="background:var(--' + vr + v + ')"></span>' + esc(L[v - 1]) });
+    });
+    var verb = s.scale === "sev" ? "Had it on " : "Rated on ";
+    var sum = '<div class="lk-sum"><b>' + verb + hits.length + ' day' + (hits.length === 1 ? "" : "s") + '</b>' +
+      (s.scale === "sev" ? ' <span class="dim">· rated None on ' + (checked - hits.length) + '</span>' : '') + '</div>' +
+      '<div class="hint">Days you didn’t rate ' + esc(s.name) + ' at all aren’t counted either way.' +
+      (s.active ? '' : ' You’re not tracking this one right now, so recent days won’t have it.') + '</div>';
+    return sum + lookupList(hits, "Nothing above None for " + esc(s.name) + " in this range.");
+  }
+
+  if (sel.indexOf("bm:") === 0) {
+    var loose = sel === "bm:loose", want = loose ? [6, 7] : [1, 2];
+    dates.forEach(function (dt) {
+      var d = STATE.days[dt], list = (d && d.bristol) || [];
+      if (!list.length) return;
+      var m = list.filter(function (x) { return want.indexOf(x) >= 0; });
+      if (!m.length) return;
+      var tally = {}; m.forEach(function (x) { tally[x] = (tally[x] || 0) + 1; });
+      var txt = Object.keys(tally).map(function (k) { return "Type " + k + (tally[k] > 1 ? " ×" + tally[k] : ""); }).join(", ");
+      hits.push({ date: dt, html: '<span class="lk-sw" style="background:var(--s' + (loose ? 4 : 2) + ')"></span>' + esc(txt) });
+    });
+    return '<div class="lk-sum"><b>' + hits.length + ' day' + (hits.length === 1 ? "" : "s") + '</b> <span class="dim">with ' + (loose ? "loose (type 6–7)" : "hard (type 1–2)") + ' stools logged</span></div>' +
+      lookupList(hits, "None logged in this range.");
+  }
+
+  if (sel === "txt") {
+    var q = (UI.lookTxt || "").trim().toLowerCase();
+    if (!q) return '<div class="hint">Type a word and tap Search (or Done).</div>';
+    var snip = function (t) {
+      var i = t.toLowerCase().indexOf(q); if (i < 0) return null;
+      var a = Math.max(0, i - 30), b = Math.min(t.length, i + q.length + 40);
+      return (a > 0 ? "…" : "") + esc(t.slice(a, i)) + '<b>' + esc(t.slice(i, i + q.length)) + '</b>' + esc(t.slice(i + q.length, b)) + (b < t.length ? "…" : "");
+    };
+    dates.forEach(function (dt) {
+      var d = STATE.days[dt]; if (!d) return;
+      var found = [];
+      if (d.notes) { var n = snip(d.notes); if (n) found.push(n); }
+      (d.meals || []).forEach(function (m) { var t = [m.what, m.note].filter(Boolean).join(" — "); var x = t && snip(t); if (x) found.push("Meal: " + x); });
+      (d.act || []).forEach(function (a) { var x = a.type && snip(a.type); if (x) found.push("Activity: " + x); });
+      if (found.length) hits.push({ date: dt, html: found.join("<br>") });
+    });
+    return '<div class="lk-sum"><b>' + hits.length + ' day' + (hits.length === 1 ? "" : "s") + '</b> <span class="dim">mention “' + esc(UI.lookTxt.trim()) + '”</span></div>' +
+      lookupList(hits, "No notes or meals mention that in this range.");
+  }
+  return "";
+}
+
+function lookupList(hits, emptyMsg) {
+  if (!hits.length) return '<div class="empty">' + emptyMsg + '</div>';
+  var html = "", cur = "";
+  hits.forEach(function (h) {
+    var d = parseISO(h.date), mk = MONTHS_LONG[d.getMonth()] + " " + d.getFullYear();
+    if (mk !== cur) {
+      cur = mk;
+      var n = hits.filter(function (x) { var y = parseISO(x.date); return y.getMonth() === d.getMonth() && y.getFullYear() === d.getFullYear(); }).length;
+      html += '<div class="lk-mon">' + mk + ' · ' + n + ' day' + (n === 1 ? "" : "s") + '</div>';
+    }
+    html += '<button class="lk-row" data-a="openDay" data-v="' + h.date + '"><span class="lk-d">' + DOW[d.getDay()].slice(0, 3) + ', ' + MON[d.getMonth()] + ' ' + d.getDate() + '</span>' +
+      '<span class="lk-v">' + h.html + '</span><span class="lk-go">›</span></button>';
+  });
+  return html;
+}
+var MONTHS_LONG = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+/* ---------------- folding ----------------
+   Any card whose first child is its title bar can be closed with a tap on that
+   bar. Which ones she has closed is a display preference, kept apart from her
+   log, so it never travels in a backup and can never touch her data. */
+var FOLD = (function () { try { return JSON.parse(localStorage.getItem("tfn-fold") || "{}") || {}; } catch (e) { return {}; } })();
+function saveFold() { try { localStorage.setItem("tfn-fold", JSON.stringify(FOLD)); } catch (e) {} }
+var CHEV = '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+function applyFolds(v) {
+  var cards = v.querySelectorAll(".card");
+  for (var i = 0; i < cards.length; i++) {
+    var c = cards[i], h = c.firstElementChild;
+    if (!h || !h.classList.contains("card-h")) continue;
+    var h2 = h.querySelector("h2"); if (!h2) continue;
+    var key = VIEW + ":" + (c.getAttribute("data-fold") || h2.textContent.trim());
+    var shut = !!FOLD[key];
+    h.classList.add("fold-h");
+    h.setAttribute("data-a", "fold"); h.setAttribute("data-v", key);
+    h.setAttribute("role", "button"); h.setAttribute("aria-expanded", shut ? "false" : "true");
+    h.insertAdjacentHTML("beforeend", CHEV);
+    if (shut) c.classList.add("folded");
+  }
+}
+function setFold(card, shut) {
+  var h = card.firstElementChild, key = h.getAttribute("data-v");
+  card.classList.toggle("folded", shut);
+  h.setAttribute("aria-expanded", shut ? "false" : "true");
+  if (shut) FOLD[key] = 1; else delete FOLD[key];
 }
 
 /* ============================================================
@@ -1666,7 +1828,8 @@ function viewTrends() {
       '</span></li>';
   }).join("") : '<li class="empty">No changes logged in the last 90 days.</li>';
 
-  return '<div class="sec" style="margin-top:14px"><span class="eyebrow">Patterns</span></div>' +
+  return '<div class="sec" style="margin-top:14px"><span class="eyebrow">Patterns</span></div>' + '<div class="foldbar noprint"><button class="btn sm ghost" data-a="foldAll" data-v="1">Collapse all</button><button class="btn sm ghost" data-a="foldAll" data-v="0">Expand all</button></div>' +
+    lookupBlock() +
     '<div class="card"><div class="card-h"><h2>Symptom grid</h2><span class="sub">' + cov.logged + ' of ' + cov.total + ' days logged</span></div>' +
     '<div class="row" style="margin-bottom:14px"><select data-a="trendDays" style="width:auto">' + dOpts + '</select>' +
     '<select data-a="trendGroup" style="width:auto">' + gOpts + '</select></div>' +
@@ -3453,6 +3616,12 @@ function act(a, t) {
     case "date": CUR = addDays(CUR, +v); if (CUR > todayISO()) CUR = todayISO(); render(); return;
     case "jumpToday": CUR = todayISO(); render(); return;
     case "openDay": CUR = v; VIEW = "today"; render(); window.scrollTo(0, 0); return;
+    case "fold": { var fc = t.closest(".card"); if (!fc) return; setFold(fc, !fc.classList.contains("folded")); saveFold(); if (!fc.classList.contains("folded")) initStrips(); return; }
+    case "foldAll": {
+      var all = el("view").querySelectorAll(".card > .fold-h");
+      for (var fi = 0; fi < all.length; fi++) setFold(all[fi].parentNode, v === "1");
+      saveFold(); if (v !== "1") initStrips(); return;
+    }
 
     /* ---- symptoms ---- */
     case "rate": day = DW(CUR); day.s[id] = (day.s[id] === +v ? undefined : +v); if (day.s[id] === undefined) delete day.s[id]; markDirty(); render(); return;
@@ -3896,7 +4065,8 @@ function wire() {
     if (!t) return;
     var a = t.getAttribute("data-a");
     if (a === "setDate" || a === "trendDays" || a === "trendGroup" || a === "cmpEvent" || a === "cmpWin" || a === "cycleSym" ||
-        a === "sumPick" || a === "sumFrom" || a === "sumTo" || a === "qWho") return;
+        a === "sumPick" || a === "sumFrom" || a === "sumTo" || a === "qWho" ||
+        a === "lookSym" || a === "lookRange" || a === "lookTxt") return;
     if (a === "scrim" && e.target !== t) return;
     e.preventDefault();
     act(a, t);
@@ -3912,6 +4082,9 @@ function wire() {
     if (a === "cmpEvent") { UI.cmpEvent = t.value; render(); return; }
     if (a === "cmpWin") { UI.cmpWin = +t.value; render(); return; }
     if (a === "cycleSym") { UI.cyclePhaseSym = t.value; render(); return; }
+    if (a === "lookSym") { UI.lookSym = t.value; render(); if (t.value === "txt") { var lt = document.querySelector('[data-a="lookTxt"]'); if (lt) lt.focus(); } return; }
+    if (a === "lookRange") { UI.lookRange = t.value; render(); return; }
+    if (a === "lookTxt") { UI.lookTxt = t.value; render(); return; }
     if (a === "sumPick") {
       UI.sumPick = t.value;
       if (t.value === "custom" && !UI.sumFrom) { UI.sumFrom = addDays(todayISO(), -59); UI.sumTo = todayISO(); }
