@@ -164,6 +164,9 @@ label.btn{overflow:hidden}
 .card.folded > .fold-h .chev{transform:rotate(-90deg)}
 .card.folded > :not(.fold-h){display:none !important}
 .foldbar{display:flex;gap:8px;justify-content:flex-end;margin:0 0 12px}
+.report .rsec > h2.fold-h{display:flex;align-items:center}
+.rsec.folded > :not(.fold-h){display:none !important}
+.rsec.folded > h2.fold-h .chev{transform:rotate(-90deg)}
 .lk-mon{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin:16px 0 4px}
 .lk-row{display:flex;align-items:center;gap:10px;width:100%;padding:11px 2px;border:0;border-bottom:1px solid var(--line);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .lk-row .lk-d{flex:none;width:118px;font-size:14px}
@@ -171,7 +174,7 @@ label.btn{overflow:hidden}
 .lk-row .lk-go{flex:none;color:var(--ink-3)}
 .lk-sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:7px}
 .lk-sum{font-size:14px;margin:4px 0 2px}
-@media print{ .card.folded > :not(.fold-h){display:revert !important} .fold-h .chev,.foldbar{display:none} }
+@media print{ .card.folded > :not(.fold-h),.rsec.folded > :not(.fold-h){display:revert !important} .fold-h .chev,.foldbar{display:none} }
 .muted{color:var(--ink-2)}
 .dim{color:var(--ink-3)}
 .tiny{font-size:12px}
@@ -619,7 +622,7 @@ function blankState() {
 }
 
 /* Version shown under Setup, so she can tell at a glance she has the update. */
-var APP_VERSION = "2026-10-31";
+var APP_VERSION = "2026-11-07";
 
 /* Questions grew from {id, text, created} into a record that lives until it is
    actually asked: who it is for, when it was asked, and what the answer was.
@@ -1223,7 +1226,7 @@ function render() {
   else if (VIEW === "labs") v.innerHTML = viewLabs();
   else if (VIEW === "meds") v.innerHTML = viewMeds();
   else if (VIEW === "summary") v.innerHTML = viewSummary();
-  if (VIEW === "today" || VIEW === "trends") applyFolds(v);
+  if (VIEW === "today" || VIEW === "trends" || VIEW === "summary") applyFolds(v);
   paintSaveBar();
   paintNotices();
   if (VIEW === "labs") wireLabChart();
@@ -1624,11 +1627,11 @@ var FOLD = (function () { try { return JSON.parse(localStorage.getItem("tfn-fold
 function saveFold() { try { localStorage.setItem("tfn-fold", JSON.stringify(FOLD)); } catch (e) {} }
 var CHEV = '<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
 function applyFolds(v) {
-  var cards = v.querySelectorAll(".card");
+  var cards = v.querySelectorAll(".card, .rsec");
   for (var i = 0; i < cards.length; i++) {
     var c = cards[i], h = c.firstElementChild;
-    if (!h || !h.classList.contains("card-h")) continue;
-    var h2 = h.querySelector("h2"); if (!h2) continue;
+    if (!h || !(h.classList.contains("card-h") || (c.classList.contains("rsec") && h.tagName === "H2"))) continue;
+    var h2 = h.tagName === "H2" ? h : h.querySelector("h2"); if (!h2) continue;
     var key = VIEW + ":" + (c.getAttribute("data-fold") || h2.textContent.trim());
     var shut = !!FOLD[key];
     h.classList.add("fold-h");
@@ -2911,7 +2914,7 @@ function viewSummary() {
     '<button class="btn" data-a="qAdd">Add a question</button>' +
     '<button class="btn ghost" data-a="apptAdd">Mark an appointment</button></div>' +
     (apptOpts.length ? '' : '<div class="hint noprint" style="margin-bottom:14px">Mark an appointment date and this page will cover everything since that visit. Until then it covers the last 60 days.</div>') +
-    periodPicker(P) + questionsCard() +
+    periodPicker(P) + '<div class="foldbar noprint"><button class="btn sm ghost" data-a="foldAll" data-v="1">Collapse all</button><button class="btn sm ghost" data-a="foldAll" data-v="0">Expand all</button></div>' + questionsCard() +
     '<div class="report" id="reportEl">' +
       '<div class="eyebrow">Pre-visit summary</div>' +
       '<h1>' + (STATE.profile.name ? esc(STATE.profile.name) + " — " : "") + 'Hashimoto’s tracking</h1>' +
@@ -2948,7 +2951,11 @@ function rsec(title, body) { return '<section class="rsec"><h2>' + title + '</h2
 function summaryText() {
   var r = el("reportEl");
   if (!r) return "";
+  // folded sections are hidden on screen but always belong in the copy
+  var shut = r.querySelectorAll(".rsec.folded");
+  for (var i = 0; i < shut.length; i++) shut[i].classList.remove("folded");
   var t = r.innerText || r.textContent || "";
+  for (var j = 0; j < shut.length; j++) shut[j].classList.add("folded");
   return t.replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -3616,9 +3623,9 @@ function act(a, t) {
     case "date": CUR = addDays(CUR, +v); if (CUR > todayISO()) CUR = todayISO(); render(); return;
     case "jumpToday": CUR = todayISO(); render(); return;
     case "openDay": CUR = v; VIEW = "today"; render(); window.scrollTo(0, 0); return;
-    case "fold": { var fc = t.closest(".card"); if (!fc) return; setFold(fc, !fc.classList.contains("folded")); saveFold(); if (!fc.classList.contains("folded")) initStrips(); return; }
+    case "fold": { var fc = t.closest(".card, .rsec"); if (!fc) return; setFold(fc, !fc.classList.contains("folded")); saveFold(); if (!fc.classList.contains("folded")) initStrips(); return; }
     case "foldAll": {
-      var all = el("view").querySelectorAll(".card > .fold-h");
+      var all = el("view").querySelectorAll(".card > .fold-h, .rsec > .fold-h");
       for (var fi = 0; fi < all.length; fi++) setFold(all[fi].parentNode, v === "1");
       saveFold(); if (v !== "1") initStrips(); return;
     }
