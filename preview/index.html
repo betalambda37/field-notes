@@ -183,6 +183,11 @@ label.btn{overflow:hidden}
 .bf-track{height:8px;background:var(--surface-2);border-radius:4px;overflow:hidden}
 .bf-fill{height:100%;border-radius:4px}
 .bf-dates{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.mk-grp{margin-top:12px}
+.mk-grp:first-of-type{margin-top:4px}
+.mk-gh{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+.mk-chips{display:flex;flex-wrap:wrap;gap:6px}
+.mk-grp[hidden],.mk-chips [hidden]{display:none !important}
 @media print{ .card.folded > :not(.fold-h),.rsec.folded > :not(.fold-h){display:revert !important} .fold-h .chev,.foldbar{display:none} }
 .muted{color:var(--ink-2)}
 .dim{color:var(--ink-3)}
@@ -391,7 +396,7 @@ td.num,th.num{text-align:right;font-family:var(--ff-mono);font-variant-numeric:t
 </style>
 </head>
 <body>
-<div style="position:sticky;top:0;z-index:300;background:#b4532a;color:#fff;font:600 13px -apple-system,sans-serif;text-align:center;padding:8px 12px">PREVIEW: not your live app yet. Look at Trends, then What came before.</div>
+<div style="position:sticky;top:0;z-index:300;background:#b4532a;color:#fff;font:600 13px -apple-system,sans-serif;text-align:center;padding:8px 12px">PREVIEW: not your live app yet. New: What came before (Trends) and grouped tests with search (Labs).</div>
 <div id="root"></div>
 <script id="app-js">
 /* ============================================================
@@ -601,7 +606,7 @@ var SAVE_ERR = "";
 var saveTimer = null;
 var FIRST_RUN = false;                 // nothing has ever been stored here
 var LOAD_TROUBLE = "";                 // set if stored text existed but wouldn't parse
-var UI = { libQuery: "", libOpen: false, trendDays: 30, trendGroup: "all", labMarker: null, cmpEvent: null, cmpWin: 14, cyclePhaseSym: null, labEvAll: false, lookSym: "", lookRange: "all", lookTxt: "", bfSym: "", bfTh: 3, bfWin: 1 };
+var UI = { libQuery: "", libOpen: false, trendDays: 30, trendGroup: "all", labMarker: null, cmpEvent: null, cmpWin: 14, cyclePhaseSym: null, labEvAll: false, lookSym: "", lookRange: "all", lookTxt: "", bfSym: "", bfTh: 3, bfWin: 1, labQ: "" };
 
 var LS_OK = (function () {
   try {
@@ -1239,7 +1244,7 @@ function render() {
   if (VIEW === "today" || VIEW === "trends" || VIEW === "summary") applyFolds(v);
   paintSaveBar();
   paintNotices();
-  if (VIEW === "labs") wireLabChart();
+  if (VIEW === "labs") { wireLabChart(); filterLabChips(); }
   initStrips();
   window.scrollTo(0, y);
 }
@@ -2344,10 +2349,19 @@ function viewLabs() {
   var m = byIdIn(STATE.markers, UI.labMarker);
   var res = markerResults(m.id);
 
-  var chips = STATE.markers.map(function (x) {
-    var n = markerResults(x.id).length;
-    return '<button class="chip n ' + (x.id === UI.labMarker ? "pc4" : "") + '" data-a="pickMarker" data-id="' + x.id + '" aria-pressed="' + (x.id === UI.labMarker ? "true" : "false") + '" style="flex:0 0 auto">' + esc(x.name) + ' <span class="dim mono" style="font-size:10px">' + n + '</span></button>';
-  }).join("");
+  /* Grouped by body system and sorted A–Z inside each group, with a search
+     box, so one test can be found among dozens. Grouping is by name only;
+     nothing about a marker is changed. */
+  var grouped = {};
+  STATE.markers.forEach(function (x) { var g = markerGroup(x.name); (grouped[g] = grouped[g] || []).push(x); });
+  var chips = '<div class="card"><div class="fld" style="margin-bottom:6px"><input type="search" id="labQ" style="width:100%" value="' + esc(UI.labQ || "") + '" placeholder="Search ' + STATE.markers.length + ' tests, e.g. ferritin" autocomplete="off"></div>' +
+    MARKER_GROUPS.map(function (g) { return g[0]; }).concat(["Other"]).filter(function (g) { return grouped[g]; }).map(function (g) {
+      var list = grouped[g].slice().sort(function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; });
+      return '<div class="mk-grp"><div class="mk-gh">' + esc(g) + ' \u00b7 ' + list.length + '</div><div class="mk-chips">' + list.map(function (x) {
+        var n = markerResults(x.id).length;
+        return '<button class="chip n ' + (x.id === UI.labMarker ? "pc4" : "") + '" data-a="pickMarker" data-id="' + x.id + '" data-name="' + esc(x.name.toLowerCase()) + '" aria-pressed="' + (x.id === UI.labMarker ? "true" : "false") + '" style="flex:0 0 auto">' + esc(x.name) + ' <span class="dim mono" style="font-size:10px">' + n + '</span></button>';
+      }).join("") + '</div></div>';
+    }).join("") + '<div class="hint" id="labQnone" hidden style="margin-top:8px">No test matches that.</div></div>';
 
   var latest = res.length ? res[res.length - 1] : null;
   var prev = res.length > 1 ? res[res.length - 2] : null;
@@ -2393,8 +2407,32 @@ function viewLabs() {
     '<button class="btn ghost" data-a="markerAdd">Add one marker</button></div>';
 
   return '<div class="sec" style="margin-top:14px"><span class="eyebrow">Markers</span></div>' +
-    '<div class="row" style="gap:6px;margin-bottom:14px">' + chips + '</div>' +
+    chips +
     actions + head + markerRefNotes(m) + ranges + table + refNotesCard() + labVisitsCard() + '<div style="height:24px"></div>';
+}
+
+var MARKER_GROUPS = [
+  ["Thyroid", /\btsh\b|\bt\s*-?[34]\b|thyro|\btpo\b|reverse\s*t|\bft[34]\b|\brt3\b/i],
+  ["Blood sugar", /a1c|glucose|insulin|homa/i],
+  ["Iron", /ferritin|\biron\b|tibc|transferrin|hemoglobin|hematocrit/i],
+  ["Lipids", /lipid|cholesterol|triglycer|\bhdl\b|\bldl\b|\bvldl\b/i],
+  ["Vitamins & minerals", /vitamin|\bb12\b|folate|zinc|selenium|magnesium|copper|iodine|calcium|potassium|sodium/i],
+  ["Inflammation", /crp|\besr\b|sed rate|homocysteine/i],
+  ["Hormones", /cortisol|dhea|estradiol|progesterone|testosterone|\blh\b|\bfsh\b|prolactin|shbg/i]
+];
+function markerGroup(name) {
+  for (var i = 0; i < MARKER_GROUPS.length; i++) if (MARKER_GROUPS[i][1].test(name)) return MARKER_GROUPS[i][0];
+  return "Other";
+}
+function filterLabChips() {
+  var q = (UI.labQ || "").trim().toLowerCase(), any = false;
+  var grps = document.querySelectorAll(".mk-grp");
+  for (var i = 0; i < grps.length; i++) {
+    var cs = grps[i].querySelectorAll("[data-name]"), shown = 0;
+    for (var j = 0; j < cs.length; j++) { var hit = !q || cs[j].getAttribute("data-name").indexOf(q) >= 0; cs[j].hidden = !hit; if (hit) shown++; }
+    grps[i].hidden = !shown; if (shown) any = true;
+  }
+  var none = el("labQnone"); if (none) none.hidden = any;
 }
 
 /* ---------- lab visits: one note for the whole draw ----------
@@ -4270,6 +4308,7 @@ function wire() {
       if (m) { m[mk] = t.value.trim(); markDirty(); }
       return;
     }
+    if (t.id === "labQ") { UI.labQ = t.value; filterLabChips(); return; }
     if (t.id === "libQ") { UI.libQuery = t.value; var b = el("modalBody"); if (b) { b.innerHTML = libBody(); var n = el("libQ"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } } return; }
   });
 
